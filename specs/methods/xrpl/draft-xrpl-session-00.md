@@ -337,7 +337,24 @@ a payload whose fields do not match the schema.
 
 The server MUST verify the claim signature over the tuple of channel
 ID and cumulative amount, against the channel's authorised public
-key {{XRPL-KEYS}}, **before** any ledger lookup.
+key {{XRPL-KEYS}}.
+
+That key is a property of the channel, not of the server. A funder
+chooses it in its own `PaymentChannelCreate` {{XRPL-CHAN-CREATE}},
+so a server accepting channels from callers it has not met cannot
+know it in advance and MUST read it from the channel. A server MAY
+additionally pin one expected key and refuse channels naming any
+other, which restricts it to a single funder; a server that does so
+still verifies against the channel's key, and the pin is a
+restriction on which channels are acceptable rather than a
+substitute for reading one.
+
+Ordering follows from where the key came from. A server holding a
+pinned key SHOULD verify the signature before any ledger lookup: the
+check is local, and a caller can otherwise force a lookup for every
+forged voucher it sends. A server reading the key from the channel
+has nothing to verify against until that read completes, and MUST
+NOT accept a claim on the strength of the read alone.
 
 Verification MAY be performed locally or through the ledger's
 `channel_verify` method {{XRPL-CHANNEL-VERIFY}}. Local verification is
@@ -362,9 +379,23 @@ verify on-chain. See [](#amount-precision).
 
 ## Sender Binding
 
-The address derived from the channel's authorised public key MUST
-match the address in the credential's `source` DID. Without this, a
-claim can be replayed under another party's identity.
+The channel's `Account` MUST match the address in the credential's
+`source` DID. Without this, a claim can be replayed under another
+party's identity.
+
+The comparison MUST NOT be made against an address derived from the
+channel's authorised public key. A channel may name any valid key
+{{XRPL-PAYCHAN-OBJECT}}, and a funder is well advised to dedicate a
+key pair to the channel so that its loss costs that channel alone;
+the address derived from such a key belongs to nobody. Deriving the
+funder from the key therefore rejects the funders that hold their
+keys most carefully, and where it does succeed it establishes only
+that the account and the channel key coincide.
+
+A server that has not read the channel -- see [](#channel-state) --
+has no `Account` to compare against, and can bind only to an address
+derived from a key it pinned itself. That is one of the checks such a
+server gives up.
 
 ## Channel State {#channel-state}
 
@@ -375,7 +406,8 @@ The server MUST confirm, against the ledger, that:
    a funder can otherwise open a channel to an address of its own
    choosing and receive service against claims this server can never
    redeem;
-3. its `PublicKey` matches the key the server verifies against;
+3. its `PublicKey` is the key the claim signature was verified
+   against, and, where the server pins an expected key, is that key;
 4. its `SettleDelay` is at least the server's configured minimum;
 5. the cumulative claimed does not exceed `Amount` less `Balance`;
 6. the channel is not expired, and not within the settlement margin
