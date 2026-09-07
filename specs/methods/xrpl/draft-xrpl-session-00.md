@@ -274,10 +274,19 @@ server state rather than its own bookkeeping.
 
 A challenge that names no channel cannot: there is nothing to look
 the mark up by, and reporting zero is all it can do. A client MUST
-therefore track the highest cumulative it has signed per channel and
-sign above that, taking whichever of the two is greater. Signing
-from a reported zero alone re-sends an accepted cumulative, which
-the server MUST refuse as a replay -- see [](#monotonicity).
+therefore track the highest cumulative it has signed, per network
+and channel together, and sign above that, taking whichever of the
+two is greater. Signing from a reported zero alone re-sends an
+accepted cumulative, which the server MUST refuse as a replay --
+see [](#monotonicity).
+
+Per network as well as per channel because a channel ID does not
+identify a channel on its own: it derives from the funder, the
+destination and a sequence number, and one seed controls the same
+address on every network, so the same funder opening to the same
+destination from a fresh account produces the same ID twice. A mark
+shared between them makes the second network sign above what it was
+asked for.
 
 `channelId` is empty when the server names no channel, for either
 of two reasons. On an open-action challenge the channel does not
@@ -287,6 +296,21 @@ no channel to name, because a client learns its channel ID from its
 own `PaymentChannelCreate`. In both cases the client supplies the
 channel, and a credential payload MUST always carry a full 64-hex
 channel ID -- the empty form is confined to the challenge.
+
+## Network
+
+Servers SHOULD set `network` in `methodDetails`, as
+{{I-D.xrpl-charge}} requires of a charge, and this document defines
+no default either.
+
+Clients SHOULD refuse a challenge naming a network other than the
+one they were configured for. The stake is higher here than on a
+charge: answering an open-action challenge means submitting a
+`PaymentChannelCreate`, so a client that follows the challenge
+deposits real XRP on a ledger its operator did not choose. The same
+seed controls the same address on every network, so the deposit
+comes from a funded account whatever the client believed it was
+configured for.
 
 # Credential Schema
 
@@ -314,6 +338,14 @@ metadata, then treats `amount` and `signature` as the first claim.
 This folds channel establishment into the 402 exchange, so no
 out-of-band endpoint is needed. A server MAY instead require the
 client to open the channel itself and supply the ID by other means.
+
+A client SHOULD take the transaction's `Destination` from the
+challenge's `recipient`, which makes the exchange self-contained:
+nothing about the server has to be known before the resource is
+asked for. The deposit and the `SettleDelay` are not in the
+challenge and MUST NOT be inferred from one -- they bound what the
+funder stands to lose and how long it waits to recover it, so they
+belong to the funder.
 
 ## action = "voucher"
 
