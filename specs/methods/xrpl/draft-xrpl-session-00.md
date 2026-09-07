@@ -12,7 +12,7 @@ author:
   - name: Maxime Dienger
     ins: M. Dienger
     email: maximed@ripple.com
-    org: RippleX
+    org: Ripple
 
 normative:
   RFC2119:
