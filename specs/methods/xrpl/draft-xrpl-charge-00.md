@@ -527,6 +527,26 @@ NOT surface raw ledger strings.
 | `tecINSUFF_FEE`, `terINSUF_FEE_B` | fee below the current load-scaled minimum |
 | `tefBAD_AUTH`, `tefMASTER_DISABLED` | signing key not valid for the account |
 
+# Receipts
+
+A receipt for a settled charge carries the base fields
+{{I-D.httpauth-payment}} defines, and the following in addition:
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `txHash` | string | REQUIRED | Hash of the settled transaction, 64 uppercase hexadecimal characters |
+| `ledgerIndex` | number | OPTIONAL | Index of the validated ledger it settled in |
+
+The base `reference` MUST also carry the transaction hash, which is
+what the core specification asks of a method-specific reference. The
+named field exists because one opaque value cannot be read without
+method knowledge: a consumer looking for a transaction hash finds no
+field called one, and confirming the value means testing whether it
+resolves on the ledger.
+
+Servers SHOULD emit both. Clients SHOULD read `txHash` and fall back
+to `reference`.
+
 # Error Responses {#errors}
 
 Errors are Problem Details {{RFC9457}} carried on a `402` response.

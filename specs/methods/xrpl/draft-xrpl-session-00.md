@@ -555,8 +555,23 @@ the recipient nothing.
 ## Receipts
 
 A receipt for a session payment identifies the claim, not a
-transaction: the channel ID and the cumulative total. There is no
-transaction hash until redemption.
+transaction. Beyond the base fields {{I-D.httpauth-payment}} defines:
+
+| Field | Type | Voucher | Open | Meaning |
+|---|---|---|---|---|
+| `channelId` | string | REQUIRED | REQUIRED | Channel the payment went through |
+| `cumulative` | string | REQUIRED | OPTIONAL | Drop total authorised after this claim |
+| `txHash` | string | absent | REQUIRED | Hash of the submitted `PaymentChannelCreate` |
+
+A voucher receipt carries no `txHash`, and MUST NOT invent one: the
+claim settles nothing by itself, and no transaction exists until the
+channel is closed. An open receipt does carry one, because the server
+submitted a transaction to create the channel.
+
+The base `reference` remains method-specific and MAY carry these
+values in a composite form. A server MUST NOT rely on a client
+parsing one: a composite cannot be read without method knowledge,
+which is what the named fields are for.
 
 # Error Responses {#errors}
 
