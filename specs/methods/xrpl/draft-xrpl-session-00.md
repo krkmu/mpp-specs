@@ -267,15 +267,26 @@ Channel identifiers:
 | `currency` | string | no | always `"XRP"` when present |
 | `description` | string | no | display only |
 
-`amount` is the increment for this request. The cumulative total is
-the server's business: it knows the high-water mark and the client
-does not need to be trusted with the arithmetic.
+`amount` is the increment for this request, and the cumulative total
+is the server's to state where it can. A challenge that names a
+channel SHOULD report the mark for it, so a client resumes from
+server state rather than its own bookkeeping.
 
-`channelId` is empty only on an open-action challenge, because the
-channel does not exist until its creating transaction is validated
-and the ID can be read from the metadata. A credential payload MUST
-always carry a full 64-hex channel ID; the empty form is confined to
-the challenge.
+A challenge that names no channel cannot: there is nothing to look
+the mark up by, and reporting zero is all it can do. A client MUST
+therefore track the highest cumulative it has signed per channel and
+sign above that, taking whichever of the two is greater. Signing
+from a reported zero alone re-sends an accepted cumulative, which
+the server MUST refuse as a replay -- see [](#monotonicity).
+
+`channelId` is empty when the server names no channel, for either
+of two reasons. On an open-action challenge the channel does not
+exist yet: its ID cannot be read until the creating transaction is
+validated. Otherwise, a server accepting callers it has not met has
+no channel to name, because a client learns its channel ID from its
+own `PaymentChannelCreate`. In both cases the client supplies the
+channel, and a credential payload MUST always carry a full 64-hex
+channel ID -- the empty form is confined to the challenge.
 
 # Credential Schema
 
