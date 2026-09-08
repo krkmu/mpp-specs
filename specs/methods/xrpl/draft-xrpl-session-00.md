@@ -294,14 +294,28 @@ exist yet: its ID cannot be read until the creating transaction is
 validated. Otherwise, a server accepting callers it has not met has
 no channel to name, because a client learns its channel ID from its
 own `PaymentChannelCreate`. In both cases the client supplies the
-channel, and a credential payload MUST always carry a full 64-hex
-channel ID -- the empty form is confined to the challenge.
+channel. A `voucher` or `close` payload MUST carry a full 64-hex
+channel ID; the empty form is confined to the challenge. An `open`
+payload carries none, and cannot: the channel does not exist until
+the transaction it carries has been validated, and the server reads
+the ID from that transaction's metadata.
 
 ## Network
 
-Servers SHOULD set `network` in `methodDetails`, as
-{{I-D.xrpl-charge}} requires of a charge, and this document defines
-no default either.
+Servers MUST set `network` in `methodDetails`, and a server MUST
+refuse a credential whose challenge omits it or names a network other
+than the one the server settles on. A charge only recommends it
+{{I-D.xrpl-charge}}; a session requires it.
+
+The reason is that a session spans requests. Absent the field, each
+side falls back to a default of its own, and those can differ
+silently: a claim signed for a channel the client believes is on one
+ledger, verified and redeemed by a server on another. It also leaves
+a client that pinned a network nothing to compare against, so that
+guard cannot fire. A challenge naming a network the server does not
+settle on is the same divergence stated out loud, and is reachable
+where two deployments share a secret and settle on different
+ledgers.
 
 Clients SHOULD refuse a challenge naming a network other than the
 one they were configured for. The stake is higher here than on a
@@ -362,8 +376,29 @@ belong to the funder.
 
 ## action = "close"
 
-Requests that the server redeem and close. The payload carries the
-final cumulative amount and its signature.
+~~~ json
+{
+  "action": "close",
+  "channelId": "2D398F9458B0CF96284E3602E57A83E787C1A01658512F972CEDDB1819607E89",
+  "amount": "500000",
+  "signature": "304402..."
+}
+~~~
+
+Asks the server to redeem and close. The fields are those of a
+`voucher`, and carry the same meaning: `amount` is the final
+cumulative total, not an increment, and the signature covers it.
+
+A server MUST verify a `close` payload exactly as it verifies a
+`voucher` before acting on it. The request is a claim like any other,
+and being the last one confers no standing: a `close` carrying a
+cumulative below the mark, or a signature that does not verify, MUST
+be refused on the same terms.
+
+Redemption itself is the server's to perform and its timing the
+server's to choose -- see [](#redemption). A client cannot compel a
+close by asking for one, and a server MAY treat the action as a
+voucher that also signals the session is over.
 
 # Verification Procedure {#verification}
 
@@ -445,9 +480,23 @@ The server MUST confirm, against the ledger, that:
 3. its `PublicKey` is the key the claim signature was verified
    against;
 4. its `SettleDelay` is at least the server's configured minimum;
-5. the cumulative claimed does not exceed `Amount` less `Balance`;
+5. the cumulative claimed is greater than `Balance` and no greater
+   than `Amount`;
 6. the channel is not expired, and not within the settlement margin
    of expiry.
+
+`Amount` is everything the channel holds and `Balance` is what it has
+already delivered, so a cumulative claim is bounded by `Amount`
+alone. Subtracting `Balance` from it would reject valid claims: a
+channel holding 1,000,000 drops that has delivered 500,000 still
+honours a claim for 600,000.
+
+The drops a claim delivers on redemption are
+`claimed - Balance`. A server tracking what it has earned SHOULD
+compute the increment against `max(Balance, mark)` rather than
+against its own high-water mark alone, since a claim redeemed
+outside this exchange advances `Balance` without the server
+observing it.
 
 A server MAY cache this state briefly, but the two fields that can
 move against it need care of different kinds.
@@ -497,20 +546,34 @@ while still accepting the claim -- is not sufficient: after
 `CancelAfter` anyone may delete the channel and the deposit returns
 to the funder.
 
+## State Keys {#state-keys}
+
+Every piece of state a server keeps for a channel -- its high-water
+mark, any cached ledger metadata, and any record that the channel is
+finalized -- MUST be keyed on the pair of network and channel ID, not
+on the channel ID alone.
+
+A channel ID does not identify a channel on its own. It derives from
+the funder, the destination and a sequence number, and one seed
+controls the same address on every network, so the same funder
+opening to the same destination from a fresh account produces the
+same ID twice. Keyed on the ID alone, testnet activity moves a
+mainnet channel's mark, and a channel finalized on one network is
+refused on the other.
+
+The channel ID MUST be canonicalised before use as a key. Hex is
+case-insensitive as a value, and both layers beneath the store treat
+it that way: a claim signed over one casing verifies against another,
+and the ledger resolves either. A key built on the raw string is
+therefore not one key but one per casing, and the same voucher can be
+spent once for each -- unbounded in practice, since a 64-character
+identifier has as many casings as it has letters.
+
 ## Monotonicity {#monotonicity}
 
 The server MUST reject a cumulative amount that is not strictly
 greater than its high-water mark for that channel, and MUST perform
 the comparison and the update as one atomic operation.
-
-The mark MUST be keyed on a canonical form of the channel ID. Hex is
-case-insensitive as a value, and both layers beneath the store treat it
-that way: `verifyPaymentChannelClaim` hex-decodes the ID, so a claim
-signed over one casing verifies against another, and the ledger
-resolves either. A mark keyed on the raw string is therefore not one
-mark but one per casing, and the same voucher can be spent once for
-each -- which is unbounded in practice, since a 64-character
-identifier has as many casings as it has letters.
 
 Three outcomes are distinct and MUST be distinguished:
 
@@ -538,7 +601,7 @@ so a claim accepted afterwards is service given away.
 
 # Settlement Procedure
 
-## Redemption
+## Redemption {#redemption}
 
 The server submits `PaymentChannelClaim` {{XRPL-CHAN-CLAIM}}
 carrying the highest cumulative amount it holds and the matching
@@ -589,16 +652,22 @@ the recipient nothing.
 A receipt for a session payment identifies the claim, not a
 transaction. Beyond the base fields {{I-D.httpauth-payment}} defines:
 
-| Field | Type | Voucher | Open | Meaning |
-|---|---|---|---|---|
-| `channelId` | string | REQUIRED | REQUIRED | Channel the payment went through |
-| `cumulative` | string | REQUIRED | OPTIONAL | Drop total authorised after this claim |
-| `txHash` | string | absent | REQUIRED | Hash of the submitted `PaymentChannelCreate` |
+| Field | Type | Open | Voucher | Close | Meaning |
+|---|---|---|---|---|---|
+| `channelId` | string | REQUIRED | REQUIRED | REQUIRED | Channel the payment went through |
+| `cumulative` | string | OPTIONAL | REQUIRED | REQUIRED | Drop total authorised after this claim |
+| `txHash` | string | REQUIRED | absent | conditional | Transaction the server submitted |
 
 A voucher receipt carries no `txHash`, and MUST NOT invent one: the
 claim settles nothing by itself, and no transaction exists until the
-channel is closed. An open receipt does carry one, because the server
-submitted a transaction to create the channel.
+channel is closed. An open receipt does carry one, for the
+`PaymentChannelCreate` the server submitted.
+
+A `close` receipt carries one when the server redeemed in the course
+of answering, and none when it accepted the claim and deferred
+redemption, which [](#redemption) permits. Its presence is therefore
+what tells a client whether settlement has happened, and a client
+MUST NOT infer settlement from the action alone.
 
 The base `reference` remains method-specific and MAY carry these
 values in a composite form. A server MUST NOT rely on a client
@@ -733,17 +802,36 @@ payment-channel methods share.
 
 ## Voucher Challenge
 
+As on a charge, the challenge travels as `WWW-Authenticate`
+parameters with the request object base64url-encoded in `request`:
+
+~~~ http
+HTTP/1.1 402 Payment Required
+WWW-Authenticate: Payment id="qp9htNPwjAcnwDQqNTfHEulIIuAd...",
+  realm="api.example.com", method="xrpl", intent="session",
+  request="eyJhbW91bnQiOiIxMDAwMDAiLCJjaGFubmVsSWQiOiIyRDM5OEY5NDU...",
+  expires="2026-08-21T10:32:00Z"
+~~~
+
+Decoding `request`:
+
 ~~~ json
 {
-  "method": "xrpl",
-  "intent": "session",
   "amount": "100000",
   "channelId":
     "2D398F9458B0CF96284E3602E57A83E787C1A01658512F972CEDDB1819607E89",
-  "recipient": "rhewi79quXUDwcqjkpj4bXuw3cuHYC9fwv",
-  "expires": "2026-08-21T10:32:00Z"
+  "methodDetails": {
+    "cumulativeAmount": "200000",
+    "network": "testnet",
+    "reference": "a55d88b1-0174-4542-9c63-83aa7ac0db2f"
+  },
+  "recipient": "rhewi79quXUDwcqjkpj4bXuw3cuHYC9fwv"
 }
 ~~~
+
+`amount` is the increment for this request and `cumulativeAmount` the
+total already accepted, so the credential below signs their sum. The
+line breaks are for presentation.
 
 ## Voucher Credential
 
@@ -760,7 +848,7 @@ cumulative total is 300,000; the increment is 100,000.
 }
 ~~~
 
-## Redemption
+## Redemption Transaction
 
 After five such requests the server holds a claim for 500,000 drops
 and submits:

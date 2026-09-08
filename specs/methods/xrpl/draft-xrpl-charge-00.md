@@ -280,7 +280,7 @@ Addresses:
   destination tag is carried in `methodDetails.destinationTag` so
   that it remains independently verifiable.
 
-# Request Schema
+# Request Schema {#request-schema}
 
 ## Shared Fields
 
@@ -728,20 +728,37 @@ establishes.
 
 ## Challenge
 
+The `402` carries the challenge in a `WWW-Authenticate` header, with
+the request object base64url-encoded in the `request` parameter, as
+{{I-D.httpauth-payment}} defines:
+
+~~~ http
+HTTP/1.1 402 Payment Required
+WWW-Authenticate: Payment id="PgHorYGpATG5ifG-QKCa2OVPjOku...",
+  realm="api.example.com", method="xrpl", intent="charge",
+  request="eyJhbW91bnQiOiIxMDAwMDAwIiwiY3VycmVuY3kiOiJYUlAiLC...",
+  expires="2026-08-21T10:32:00Z"
+~~~
+
+The `request` parameter decodes to the object this document
+specifies in [](#request-schema):
+
 ~~~ json
 {
-  "method": "xrpl",
-  "intent": "charge",
   "amount": "1000000",
   "currency": "XRP",
-  "recipient": "rhewi79quXUDwcqjkpj4bXuw3cuHYC9fwv",
-  "expires": "2026-08-21T10:32:00Z",
   "methodDetails": {
     "network": "testnet",
     "reference": "3f7a1c02-9e44-4b1e-8a10-0c2b5d6e7f80"
-  }
+  },
+  "recipient": "rhewi79quXUDwcqjkpj4bXuw3cuHYC9fwv"
 }
 ~~~
+
+The header parameters and the request object are distinct: `method`,
+`intent` and `expires` are the scheme's, while `amount`, `currency`
+and `recipient` belong to the encoded request. The line breaks above
+are for presentation.
 
 ## Settled Transaction
 
